@@ -1,0 +1,7 @@
+google-genai
+python-dotenv
+requests
+yfinance
+pydantic
+fpdf2
+rich
