@@ -5,3 +5,4 @@ yfinance
 pydantic
 fpdf2
 rich
+feedparser

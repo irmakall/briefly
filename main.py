@@ -7,42 +7,54 @@ from google import genai
 
 import config
 
+REQUIRED_ENV_VARS = ["GEMINI_API_KEY", "GEMINI_MODEL", "NEWS_API_KEY"]
 
 def parse_args() -> argparse.Namespace:
     """Read command-line options."""
     parser = argparse.ArgumentParser(description="Briefly: daily tech & finance bulletin.")
     parser.add_argument(
         "--tickers",
-        nargs=...,       # TODO 2: accept one or more values
-        default=...,     # TODO 3: fall back to config
+        nargs="+",
+        default=config.DEFAULT_TICKERS,
         help="Stock symbols to track, e.g. --tickers THYAO.IS AAPL",
     )
     return parser.parse_args()
 
 
+def clean_tickers(raw: list[str]) -> list[str]:
+    """Upper-case the symbols, drop empty ones and duplicates, keep the order."""
+    cleaned = [t.strip().upper() for t in raw if t.strip()]
+    return list(dict.fromkeys(cleaned))
+
+
+def check_env() -> list[str]:
+    """Return the names of required .env variables that are missing or empty."""
+    return [name for name in REQUIRED_ENV_VARS if not os.environ.get(name)]
+
+
 def main() -> int:
     args = parse_args()
-    tickers = ...    # TODO 4: clean up the list (upper case, no duplicates)
+    tickers = clean_tickers(args.tickers)
+    if not tickers:
+        print("ERROR: No tickers given.", file=sys.stderr)
+        return 1
 
     load_dotenv()
-    api_key = os.environ.get("GEMINI_API_KEY")
-    model = os.environ.get("GEMINI_MODEL")
-
-    if not api_key:
+    missing = check_env()
+    if missing:
         print(
-            "ERROR: GEMINI_API_KEY not found.\n"
-            "Add a GEMINI_API_KEY=<your key> line to the .env file "
-            "(see .env.example).",
+            f"ERROR: Missing in .env: {', '.join(missing)}\n"
+            "Fill them in .env (see .env.example).",
             file=sys.stderr,
         )
         return 1
 
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    model = os.environ["GEMINI_MODEL"]
 
-    client = genai.Client(api_key=api_key)
-
-
-
-    
+    # Temporary check until the agent loop exists
+    print(f"Model: {model}")
+    print(f"Tickers: {tickers}")
     return 0
 
 

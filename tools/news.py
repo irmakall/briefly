@@ -1,13 +1,17 @@
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import requests
+
+import config
+from tools.feeds import fetch_all_feeds
 
 BASE_URL = "https://newsapi.org/v2"
 TIMEOUT_SECONDS = 10    # FR-11
 MAX_TECH_ITEMS = 20     # bulletin shows 5; give the model extra to choose from
 MAX_FINANCE_ITEMS = 10
 NEWS_WINDOW_DAYS = 2    # daily bulletin; 2 days because the free plan delays articles by 24 h
+TECH_NEWS_HOURS = 24    # only stories published in the last 24 hours
 
 
 def _newsapi_get(endpoint: str, params: dict) -> dict:
@@ -54,32 +58,47 @@ def _is_usable(article: dict) -> bool:
     return bool(article.get("url")) and article.get("title") != "[Removed]"
 
 
-def get_tech_news(limit: int = 10) -> dict:
-    """Get current technology headlines from major news sources via NewsAPI.
+def _is_recent(item: dict, cutoff: datetime) -> bool:
+    """True if the item was published after the cutoff. Items without a date are dropped."""
+    if not item["published_at"]:
+        return False
+    return datetime.fromisoformat(item["published_at"]) >= cutoff
 
-    Articles come from many outlets (e.g. The Verge, Wired, TechCrunch).
-    There is no popularity ranking, so read the descriptions and pick
+
+def get_tech_news(limit: int = 10) -> dict:
+    """Get technology news from the last 24 hours, newest first.
+
+    Stories come from the RSS feeds of TechCrunch, The Verge and Ars Technica.
+    There is no popularity ranking, so read the summaries and pick
     the most important stories yourself. Always mention each story's source.
 
     Args:
-        limit: How many headlines to return (1-20). Default is 10.
+        limit: How many stories to return (1-20). Default is 10.
 
     Returns:
-        A dict with "count" and "articles". Each article has title,
-        source, description, url and published date.
-        On failure, returns {"error": "..."} instead.
+        A dict with "count" and "articles". Each article has title, url,
+        source, published_at and summary. If some feeds failed, an "errors"
+        list names them. If no feed could be read, returns {"error": "..."}.
     """
     limit = max(1, min(limit, MAX_TECH_ITEMS))
-    data = _newsapi_get(
-        "top-headlines",
-        {"country": "us", "category": "technology", "pageSize": MAX_TECH_ITEMS},
-    )
-    if "error" in data:
-        return data
+    feeds = fetch_all_feeds(config.RSS_FEEDS)
+    if not feeds["items"]:   # every feed failed (or returned nothing)
+        errors = "; ".join(feeds.get("errors", [])) or "feeds returned no items"
+        return {"error": f"No tech news available. {errors}"}
 
-    articles = [_article_to_dict(a) for a in data.get("articles", []) if _is_usable(a)]
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=TECH_NEWS_HOURS)
+
+    articles = [item for item in feeds["items"] if _is_recent(item, cutoff)]
+
+    articles.sort(key=lambda a: a["published_at"], reverse=True)
+
     articles = articles[:limit]
-    return {"count": len(articles), "articles": articles}
+
+    result = {"count": len(articles), "articles": articles}
+    if feeds.get("errors"):
+        result["errors"] = feeds["errors"]
+
+    return result
 
 
 def get_financial_news(companies: list[str], limit: int = 3) -> dict:
